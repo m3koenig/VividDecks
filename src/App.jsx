@@ -1,617 +1,510 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Plus, Trash2, Brain, Layout,
-  Download, Upload, Share2,
-  ChevronLeft, Play, Check, X,
-  Trophy, ArrowRight, Sun, Moon,
-  Eye, Save, Send, Database, GraduationCap,
-  Layers, MessageSquare, HelpCircle, Activity,
-  Globe, Languages, TrendingUp, Target, AlertTriangle,
-  StickyNote, Type, ChevronDown
+  Brain, Layers, Settings, TrendingUp, Plus, Play, Trash2,
+  ChevronRight, CheckCircle2, XCircle, RotateCcw, LayoutGrid,
+  Moon, Sun, Share2, Award, BookOpen, Download, Upload,
+  X, FileJson, Languages, Globe2, Send, FastForward, History,
+  Check, AlertCircle, Keyboard, ThumbsUp, ThumbsDown, Copy, Link2
 } from 'lucide-react';
 
 /**
- * MindCard (Vivid Decks)
- * Version: 1.1.4 (Advanced Review)
- * Stabile Version mit Papier-UI und Seed-System.
+ * Vivid Decks v2.1
+ * - Restored original start decks
+ * - Restored session history protocol
+ * - Restored % progress indicator
+ * - Seed System for sharing via URL
+ * - Minimalist, generic wording
  */
 
-const StatusIcon = ({ name }) => {
-  switch (name) {
-    case 'plus': return <Plus size={18} />;
-    case 'save': return <Save size={18} />;
-    case 'download': return <Download size={18} />;
-    case 'upload': return <Upload size={18} />;
-    case 'share': return <Share2 size={18} />;
-    case 'send': return <Send size={18} />;
-    case 'error': return <X size={18} />;
-    default: return null;
+const DEFAULT_DECKS = [
+  {
+    id: 'vivid-en',
+    name: 'Sprache: Englisch',
+    description: 'Basis-Vokabular für den Alltag.',
+    cards: [
+      { id: 'en-1', front: 'Hund', back: 'Dog', box: 1 },
+      { id: 'en-2', front: 'Katze', back: 'Cat', box: 1 },
+      { id: 'en-3', front: 'Blau', back: 'Blue', box: 1 },
+      { id: 'en-4', front: 'Apfel', back: 'Apple', box: 1 }
+    ]
+  },
+  {
+    id: 'vivid-es',
+    name: 'Sprache: Spanisch',
+    description: 'Begrüßungen und einfache Zahlen.',
+    cards: [
+      { id: 'es-1', front: 'Hallo', back: 'Hola', box: 1 },
+      { id: 'es-2', front: 'Danke', back: 'Gracias', box: 1 },
+      { id: 'es-3', front: 'Bitte', back: 'Por favor', box: 1 },
+      { id: 'es-4', front: 'Eins, zwei, drei', back: 'Uno, dos, tres', box: 1 }
+    ]
+  },
+  {
+    id: 'vivid-it',
+    name: 'Sprache: Italienisch',
+    description: 'Essen und höfliche Phrasen.',
+    cards: [
+      { id: 'it-1', front: 'Guten Tag', back: 'Buongiorno', box: 1 },
+      { id: 'it-2', front: 'Tschüss', back: 'Ciao', box: 1 },
+      { id: 'it-3', front: 'Lecker', back: 'Delizioso', box: 1 },
+      { id: 'it-4', front: 'Frühstück', back: 'Colazione', box: 1 }
+    ]
   }
-};
+];
 
 const App = () => {
-  // --- States ---
   const [decks, setDecks] = useState(() => {
-    const saved = localStorage.getItem('mindcard_decks');
-    if (saved) {
+    const params = new URLSearchParams(window.location.search);
+    const seed = params.get('seed');
+    if (seed) {
       try {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (e) { return []; }
+        const decoded = JSON.parse(atob(decodeURIComponent(seed)));
+        return Array.isArray(decoded) ? decoded : [decoded];
+      } catch (e) {
+        console.error("Invalid seed");
+      }
     }
-    return [];
+    const saved = localStorage.getItem('vivid_decks_v21');
+    return saved ? JSON.parse(saved) : DEFAULT_DECKS;
   });
 
+  const [activeView, setActiveView] = useState('dashboard');
   const [selectedDeckId, setSelectedDeckId] = useState(null);
-  const [activeTab, setActiveTab] = useState('manage');
-  const [statusMsg, setStatusMsg] = useState(null);
-  const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem('mindcard_darkmode') === 'true';
-  });
-
-  const [fontStyle, setFontStyle] = useState(() => {
-    return localStorage.getItem('mindcard_font') || 'serif';
-  });
-
+  const [darkMode, setDarkMode] = useState(true);
   const [session, setSession] = useState(null);
-  const [isNewCardAnimating, setIsNewCardAnimating] = useState(false);
+  const [notification, setNotification] = useState(null);
 
-  const [newDeckName, setNewDeckName] = useState('');
-  const [newCardFront, setNewCardFront] = useState('');
-  const [newCardBack, setNewCardBack] = useState('');
-  const [seedInput, setSeedInput] = useState('');
+  const [userAnswer, setUserAnswer] = useState('');
+  const [isAnswerChecked, setIsAnswerChecked] = useState(false);
+  const [isCorrect, setIsCorrect] = useState(null);
 
   const fileInputRef = useRef(null);
   const answerInputRef = useRef(null);
 
-  // Memoized Selection
-  const selectedDeck = useMemo(() =>
-    decks.find(d => d.id === selectedDeckId) || null,
-    [decks, selectedDeckId]
-  );
-
-  // --- Effects ---
   useEffect(() => {
-    localStorage.setItem('mindcard_decks', JSON.stringify(decks));
+    localStorage.setItem('vivid_decks_v21', JSON.stringify(decks));
   }, [decks]);
 
+  // Keyboard controls
   useEffect(() => {
-    localStorage.setItem('mindcard_darkmode', darkMode);
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
-
-  useEffect(() => {
-    localStorage.setItem('mindcard_font', fontStyle);
-  }, [fontStyle]);
-
-  // Demo-Daten Initialisierung
-  useEffect(() => {
-    if (decks.length === 0) {
-      const demoData = [
-        {
-          id: 'deck-spanisch',
-          name: 'Spanisch Basics',
-          cards: [
-            { id: 's1', front: 'Hola', back: 'Hallo' },
-            { id: 's2', front: 'Gracias', back: 'Danke' },
-            { id: 's3', front: 'Por favor', back: 'Bitte' },
-            { id: 's4', front: 'Cerveza', back: 'Bier' },
-            { id: 's5', front: 'La cuenta', back: 'Die Rechnung' }
-          ],
-          stats: { bestPercent: 0, lastPercent: 0, lastCorrect: 0, lastWrong: 0 },
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'deck-capitals',
-          name: 'Hauptstädte Europa',
-          cards: [
-            { id: 'cap1', front: 'Frankreich', back: 'Paris' },
-            { id: 'cap2', front: 'Spanien', back: 'Madrid' },
-            { id: 'cap3', front: 'Italien', back: 'Rom' },
-            { id: 'cap4', front: 'Norwegen', back: 'Oslo' },
-            { id: 'cap5', front: 'Polen', back: 'Warschau' }
-          ],
-          stats: { bestPercent: 0, lastPercent: 0, lastCorrect: 0, lastWrong: 0 },
-          createdAt: new Date().toISOString()
-        }
-      ];
-      setDecks(demoData);
-      setSelectedDeckId('deck-spanisch');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (session && !session.showResult && !session.finished && answerInputRef.current) {
-      answerInputRef.current.focus();
-    }
-  }, [session?.currentIndex, session?.showResult, session?.finished]);
-
-  // --- Handlers ---
-  const showStatus = (iconName) => {
-    setStatusMsg(iconName);
-    setTimeout(() => setStatusMsg(null), 2000);
-  };
-
-  const createDeck = () => {
-    if (!newDeckName.trim()) return;
-    const newDeck = {
-      id: `d-${Date.now()}`,
-      name: newDeckName,
-      cards: [],
-      stats: { bestPercent: 0, lastPercent: 0, lastCorrect: 0, lastWrong: 0 },
-      createdAt: new Date().toISOString()
+    const handleKeyDown = (e) => {
+      if (activeView !== 'learn' || !session || session.isFinished) return;
+      if (isAnswerChecked) {
+        if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); nextCard(); }
+      } else {
+        if (e.key === 'Enter') { e.preventDefault(); checkAnswer(); }
+      }
     };
-    setDecks([...decks, newDeck]);
-    setNewDeckName('');
-    showStatus('plus');
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeView, isAnswerChecked, session, userAnswer]);
+
+  const notify = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
   };
 
-  const deleteDeck = (id) => {
-    setDecks(decks.filter(d => d.id !== id));
-    if (selectedDeckId === id) setSelectedDeckId(null);
+  const getSuccessRate = (deck) => {
+    if (!deck.cards || deck.cards.length === 0) return 0;
+    const learnedCards = deck.cards.filter(c => c.box > 1).length;
+    return Math.round((learnedCards / deck.cards.length) * 100);
   };
 
-  const addCard = (deckId) => {
-    if (!newCardFront.trim() || !newCardBack.trim()) return;
-    setDecks(decks.map(deck => {
-      if (deck.id === deckId) {
-        return {
-          ...deck,
-          cards: [...deck.cards, { id: `c-${Date.now()}`, front: newCardFront, back: newCardBack }]
-        };
-      }
-      return deck;
-    }));
-    setNewCardFront('');
-    setNewCardBack('');
-    showStatus('save');
+  const copyShareLink = (deck) => {
+    const seed = btoa(JSON.stringify(deck));
+    const url = new URL(window.location.href);
+    url.searchParams.set('seed', seed);
+    const link = url.toString();
+
+    const textArea = document.createElement("textarea");
+    textArea.value = link;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      notify('Link kopiert!');
+    } catch (err) {
+      notify('Fehler');
+    }
+    document.body.removeChild(textArea);
   };
 
-  const deleteCard = (deckId, cardId) => {
-    setDecks(decks.map(deck => {
-      if (deck.id === deckId) {
-        return { ...deck, cards: deck.cards.filter(c => c.id !== cardId) };
-      }
-      return deck;
-    }));
-  };
-
-  const startLearning = (deck) => {
-    if (deck.cards.length === 0) return;
-    const shuffled = [...deck.cards].sort(() => Math.random() - 0.5);
-    setActiveTab('learn');
+  const startSession = (deck) => {
+    if (deck.cards.length === 0) return notify('Deck leer');
     setSession({
       deckId: deck.id,
       deckName: deck.name,
-      cards: shuffled,
+      cards: [...deck.cards].sort(() => Math.random() - 0.5),
       currentIndex: 0,
-      userInput: '',
-      showResult: false,
       results: { correct: 0, wrong: 0 },
-      wrongAnswers: [],
-      finished: false
+      history: [],
+      isFinished: false
     });
+    setUserAnswer('');
+    setIsAnswerChecked(false);
+    setIsCorrect(null);
+    setActiveView('learn');
+    setTimeout(() => answerInputRef.current?.focus(), 100);
   };
 
   const checkAnswer = () => {
-    if (!session || session.showResult) return;
+    if (isAnswerChecked) return;
     const currentCard = session.cards[session.currentIndex];
-    const isCorrect = session.userInput.trim().toLowerCase() === currentCard.back.trim().toLowerCase();
+    const correctVal = currentCard.back.trim().toLowerCase();
+    const userVal = userAnswer.trim().toLowerCase();
 
-    setSession({
-      ...session,
-      showResult: true,
-      wrongAnswers: isCorrect ? session.wrongAnswers : [...session.wrongAnswers, { ...currentCard, userType: session.userInput }],
-      results: {
-        correct: session.results.correct + (isCorrect ? 1 : 0),
-        wrong: session.results.wrong + (isCorrect ? 0 : 1)
-      }
-    });
+    const correct = userVal === correctVal;
+    setIsCorrect(correct);
+    setIsAnswerChecked(true);
+
+    const historyEntry = {
+      front: currentCard.front,
+      back: currentCard.back,
+      input: userVal || "(Leer)",
+      isCorrect: correct
+    };
+
+    setSession(prev => ({ ...prev, history: [...prev.history, historyEntry] }));
+
+    const newBox = correct ? Math.min(currentCard.box + 1, 5) : 1;
+    setDecks(prev => prev.map(d => d.id === session.deckId ? {
+      ...d,
+      cards: d.cards.map(c => c.id === currentCard.id ? { ...c, box: newBox } : c)
+    } : d));
   };
 
   const nextCard = () => {
-    if (!session) return;
-    const isLast = session.currentIndex === session.cards.length - 1;
-    if (isLast) {
-      const percent = Math.round((session.results.correct / session.cards.length) * 100);
-      setDecks(prev => prev.map(d => d.id === session.deckId ? {
-        ...d,
-        stats: { ...d.stats, bestPercent: Math.max(d.stats.bestPercent, percent), lastPercent: percent }
-      } : d));
-      setSession({ ...session, finished: true });
+    const resultsUpdate = {
+      correct: session.results.correct + (isCorrect ? 1 : 0),
+      wrong: session.results.wrong + (isCorrect ? 0 : 1)
+    };
+
+    if (session.currentIndex < session.cards.length - 1) {
+      setSession(prev => ({
+        ...prev,
+        currentIndex: prev.currentIndex + 1,
+        results: resultsUpdate
+      }));
+      setUserAnswer('');
+      setIsAnswerChecked(false);
+      setIsCorrect(null);
+      setTimeout(() => answerInputRef.current?.focus(), 50);
     } else {
-      setIsNewCardAnimating(true);
-      setTimeout(() => {
-        setSession(prev => ({ ...prev, showResult: false, userInput: '', currentIndex: prev.currentIndex + 1 }));
-        setIsNewCardAnimating(false);
-      }, 300);
+      setSession(prev => ({ ...prev, results: resultsUpdate, isFinished: true }));
     }
   };
 
-  const generateSeed = (deck) => {
-    try {
-      const minimal = { n: deck.name, c: deck.cards.map(c => [c.front, c.back]) };
-      const seed = btoa(unescape(encodeURIComponent(JSON.stringify(minimal))));
-
-      const textArea = document.createElement("textarea");
-      textArea.value = seed;
-      textArea.style.position = "fixed";
-      textArea.style.left = "-9999px";
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-
-      showStatus('share');
-    } catch (e) { showStatus('error'); }
-  };
-
-  const loadFromSeed = () => {
-    if (!seedInput.trim()) return;
-    try {
-      const decoded = JSON.parse(decodeURIComponent(escape(atob(seedInput))));
-      const newDeck = {
-        id: `d-${Date.now()}`,
-        name: decoded.n || 'Import',
-        cards: (decoded.c || []).map(arr => ({ id: `c-${Math.random()}`, front: arr[0], back: arr[1] })),
-        stats: { bestPercent: 0, lastPercent: 0, lastCorrect: 0, lastWrong: 0 },
-        createdAt: new Date().toISOString()
-      };
-      setDecks([...decks, newDeck]);
-      setSeedInput('');
-      showStatus('send');
-    } catch (e) { showStatus('error'); }
-  };
-
-  // Hilfsklassen für Design & Typography
-  const paperClass = darkMode
-    ? "bg-slate-900 border-slate-800 shadow-[4px_4px_0px_rgba(0,0,0,0.4)]"
-    : "bg-[#fdfdf7] border-[#e2e2d5] shadow-[4px_4px_0px_rgba(200,200,180,0.5)]";
-
-  const getFontClass = () => {
-    switch (fontStyle) {
-      case 'serif': return 'font-custom-serif';
-      case 'sans': return 'font-custom-sans';
-      case 'mono': return 'font-custom-mono';
-      case 'hand': return 'font-custom-hand';
-      default: return 'font-custom-serif';
-    }
-  };
+  const activeDeck = useMemo(() => decks.find(d => d.id === selectedDeckId), [decks, selectedDeckId]);
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${getFontClass()} ${darkMode ? 'bg-slate-950 text-slate-200 dark' : 'bg-[#f4f1ea] text-[#4a4a44]'}`}>
+    <div className={`min-h-screen transition-colors duration-500 font-sans ${darkMode ? 'bg-[#08080a] text-zinc-100' : 'bg-[#f4f7f9] text-zinc-900'}`}>
+
+      {/* Background blobs */}
+      <div className="fixed inset-0 pointer-events-none opacity-20 overflow-hidden">
+        <div className={`absolute -top-40 -left-40 w-[600px] h-[600px] blur-[120px] rounded-full ${darkMode ? 'bg-indigo-600/30' : 'bg-indigo-400/20'}`} />
+      </div>
 
       {/* Navigation */}
-      <nav className={`fixed top-0 left-0 right-0 h-16 z-[100] flex items-center px-4 justify-between transition-colors ${darkMode ? 'bg-slate-900/95 border-white/10' : 'bg-[#fdfdf7]/95 border-[#e2e2d5]'} backdrop-blur-md border-b`}>
-        <div className="flex items-center gap-2 text-indigo-500">
-          <Brain size={24} strokeWidth={3} />
-          <span className="font-custom-serif italic text-lg opacity-40 hidden xs:block">MindCard</span>
+      <nav className={`fixed z-[100] transition-all bottom-0 left-0 right-0 h-20 md:h-screen md:w-20 lg:w-64 md:top-0 md:border-r border-t md:border-t-0 flex md:flex-col items-center p-2 md:p-6 gap-6 ${darkMode ? 'bg-black/80 border-white/5' : 'bg-white/90 border-black/5'} backdrop-blur-xl`}>
+        <div className="hidden md:flex items-center gap-3 mb-8">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg"><Brain className="text-white" size={20} /></div>
+          <span className="hidden lg:block font-black tracking-tighter text-xl uppercase italic">Vivid</span>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Main Navigation Tabs */}
-          <div className="flex bg-black/5 dark:bg-white/5 p-1 rounded-xl">
-            <button onClick={() => { setActiveTab('manage'); setSession(null); }} className={`p-2.5 rounded-lg transition-all ${activeTab === 'manage' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}>
-              <Database size={18} />
+        <div className="flex md:flex-col flex-1 w-full gap-2">
+          {[
+            { id: 'dashboard', icon: LayoutGrid, label: 'Kollektion' },
+            { id: 'stats', icon: TrendingUp, label: 'Status' },
+            { id: 'settings', icon: Settings, label: 'Optionen' }
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => { setActiveView(item.id); setSession(null); }}
+              className={`flex-1 md:flex-none flex flex-col lg:flex-row items-center gap-3 p-3 lg:p-4 rounded-2xl transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl' : 'opacity-40 hover:opacity-100 hover:bg-white/5'
+                }`}
+            >
+              <item.icon size={20} />
+              <span className="hidden lg:block text-[10px] font-black uppercase tracking-widest">{item.label}</span>
             </button>
-            <button onClick={() => setActiveTab('learn')} className={`p-2.5 rounded-lg transition-all ${activeTab === 'learn' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}>
-              <GraduationCap size={18} />
-            </button>
-          </div>
-
-          {/* Settings: Font Dropdown & Darkmode */}
-          <div className="flex items-center bg-black/5 dark:bg-white/5 p-1 rounded-xl ml-1">
-            <div className="relative flex items-center px-2 border-r border-black/10 dark:border-white/10">
-              <Type size={16} className="text-slate-400 mr-2" />
-              <select
-                value={fontStyle}
-                onChange={(e) => setFontStyle(e.target.value)}
-                className="bg-transparent border-none text-[10px] font-bold uppercase focus:ring-0 cursor-pointer appearance-none pr-4 outline-none text-slate-500 dark:text-slate-300"
-              >
-                <option value="serif" className="font-custom-serif bg-[#fdfdf7] dark:bg-slate-900">Serif</option>
-                <option value="sans" className="font-custom-sans bg-[#fdfdf7] dark:bg-slate-900">Sans</option>
-                <option value="mono" className="font-custom-mono bg-[#fdfdf7] dark:bg-slate-900">Mono</option>
-                <option value="hand" className="font-custom-hand bg-[#fdfdf7] dark:bg-slate-900">Hand</option>
-              </select>
-              <ChevronDown size={10} className="absolute right-1 pointer-events-none text-slate-400" />
-            </div>
-            <button onClick={() => setDarkMode(!darkMode)} className={`p-2.5 rounded-lg transition-colors ${darkMode ? 'text-yellow-400' : 'text-slate-400'}`}>
-              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-          </div>
+          ))}
         </div>
+
+        <button onClick={() => setDarkMode(!darkMode)} className="p-4 rounded-2xl opacity-40 hover:opacity-100 transition-all md:mt-auto">
+          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
       </nav>
 
-      {/* Status Overlay */}
-      {statusMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[110] bg-indigo-600 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg animate-in zoom-in-50 duration-200">
-          <StatusIcon name={statusMsg} />
-        </div>
-      )}
+      <main className="md:ml-20 lg:ml-64 pb-32 md:pb-12 relative z-10">
+        <div className="max-w-6xl mx-auto p-6 md:p-12">
 
-      <main className="max-w-5xl mx-auto px-4 pt-24 pb-12 min-h-screen relative z-10">
-        {activeTab === 'manage' ? (
-          <div className="space-y-8 animate-in fade-in duration-500">
-            <header className={`p-2 rounded-xl border-2 flex flex-wrap items-center gap-2 ${paperClass}`}>
-              <div className="flex gap-1">
-                <button onClick={() => showStatus('download')} className="p-3.5 hover:text-indigo-600 text-slate-400"><Download size={20} /></button>
-                <button onClick={() => fileInputRef.current?.click()} className="p-3.5 hover:text-indigo-600 text-slate-400"><Upload size={20} /></button>
-                <input type="file" ref={fileInputRef} className="hidden" />
-              </div>
-              <div className="flex-1 min-w-[150px] flex gap-2">
-                <input
-                  value={seedInput}
-                  onChange={(e) => setSeedInput(e.target.value)}
-                  type="text" placeholder="Seed importieren..." className="flex-1 bg-black/5 dark:bg-white/5 border-none focus:ring-0 text-sm px-4 py-3 rounded-lg outline-none italic"
-                />
-                <button onClick={loadFromSeed} className="p-3.5 text-indigo-600 flex items-center justify-center"><Send size={18} /></button>
-              </div>
-            </header>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* Sidebar Decks */}
-              <div className="lg:col-span-4 space-y-4">
-                <div className={`p-4 rounded-xl border-2 ${paperClass}`}>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      value={newDeckName} onChange={e => setNewDeckName(e.target.value)}
-                      placeholder="Neues Deck..." className="flex-1 bg-transparent border-none focus:ring-0 font-bold text-base p-2 outline-none"
-                    />
-                    <button onClick={createDeck} className="p-3 bg-indigo-600 text-white rounded-xl shadow-md active:scale-90 transition flex items-center justify-center shrink-0 h-10 w-10">
-                      <Plus size={20} />
-                    </button>
-                  </div>
+          {activeView === 'dashboard' && (
+            <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <header className="flex justify-between items-end">
+                <div>
+                  <h1 className="text-5xl md:text-8xl font-black italic tracking-tighter leading-none uppercase">Vivid Decks</h1>
+                  <p className="opacity-30 font-black mt-4 uppercase text-[10px] tracking-[0.4em]">Personal Knowledge System</p>
                 </div>
+                <button onClick={() => {
+                  const name = prompt('Name:');
+                  if (name) setDecks([...decks, { id: Date.now(), name, description: 'Eigene Sammlung', cards: [] }]);
+                }} className="w-16 h-16 bg-indigo-600 text-white rounded-2xl shadow-xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all">
+                  <Plus size={28} />
+                </button>
+              </header>
 
-                <div className="space-y-3">
-                  {decks.map(deck => (
-                    <div
-                      key={deck.id} onClick={() => setSelectedDeckId(deck.id)}
-                      className={`p-5 rounded-lg border-2 cursor-pointer transition-all flex justify-between items-center relative overflow-hidden ${selectedDeckId === deck.id
-                          ? 'bg-indigo-600 border-indigo-700 text-white translate-x-1 shadow-none'
-                          : `${paperClass} hover:translate-x-1`
-                        }`}
-                    >
-                      <div className={`absolute top-0 left-0 w-1.5 h-full ${selectedDeckId === deck.id ? 'bg-white/20' : 'bg-red-200'}`} />
-                      <div className="truncate pr-3 z-10">
-                        <p className="font-bold text-sm uppercase truncate tracking-tight italic">{deck.name}</p>
-                        <div className="flex items-center gap-3 mt-1 font-bold text-[10px] opacity-60">
-                          <Layers size={12} /> {deck.cards.length}
-                          {deck.stats?.bestPercent > 0 && <span className="flex items-center gap-1 text-yellow-500"><Trophy size={10} /> {deck.stats.bestPercent}%</span>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {decks.map(deck => {
+                  const rate = getSuccessRate(deck);
+                  return (
+                    <div key={deck.id} className={`group p-8 rounded-[2.5rem] border transition-all hover:-translate-y-2 flex flex-col relative ${darkMode ? 'bg-zinc-900/40 border-white/5 hover:border-white/20' : 'bg-white border-black/5 shadow-xl'}`}>
+                      <div className="flex justify-between items-start mb-8">
+                        <div className="p-4 bg-indigo-500/10 rounded-2xl text-indigo-500">
+                          <BookOpen size={24} />
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => copyShareLink(deck)} className="p-3 opacity-0 group-hover:opacity-100 transition-all text-indigo-500 hover:bg-indigo-500/10 rounded-xl" title="Teilen">
+                            <Link2 size={18} />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 z-10">
-                        <button onClick={(e) => { e.stopPropagation(); generateSeed(deck); }} className="p-2.5 rounded-lg hover:bg-black/5 transition flex items-center justify-center"><Share2 size={16} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); deleteDeck(deck.id); }} className="p-2.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 transition flex items-center justify-center"><Trash2 size={16} /></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Editor View */}
-              <div className="lg:col-span-8">
-                {selectedDeck ? (
-                  <div className={`rounded-xl border-2 shadow-xl min-h-[500px] flex flex-col ${paperClass}`}>
-                    <div className="p-6 flex justify-between items-center border-b-2 border-dotted border-black/10 gap-4">
-                      <div className="flex items-center gap-3 truncate">
-                        <StickyNote size={24} className="text-indigo-500" />
-                        <h2 className="text-xl font-bold uppercase tracking-widest italic">{selectedDeck.name}</h2>
+                      <div className="mb-6">
+                        <h3 className="text-2xl font-black mb-1 italic tracking-tight">{deck.name}</h3>
+                        <p className="text-[10px] font-black uppercase opacity-20 tracking-widest">{deck.cards.length} Einheiten</p>
                       </div>
-                      <button onClick={() => startLearning(selectedDeck)} className="w-12 h-12 bg-indigo-600 text-white rounded-xl shadow-lg hover:rotate-2 transition active:scale-95 flex items-center justify-center">
-                        <Play size={20} fill="currentColor" />
-                      </button>
-                    </div>
 
-                    <div className="p-6 space-y-6 flex-1">
-                      <div className="p-6 rounded-lg border-2 border-indigo-500/20 bg-indigo-500/5 space-y-4">
-                        <div className="flex items-center gap-4">
-                          <HelpCircle size={20} className="opacity-30" />
-                          <input value={newCardFront} onChange={e => setNewCardFront(e.target.value)} placeholder="Frage..." className="w-full bg-transparent border-none focus:ring-0 font-bold text-lg outline-none" />
+                      <div className="mb-10 space-y-2">
+                        <div className="flex justify-between items-end px-1">
+                          <span className="text-[10px] font-black uppercase opacity-40">Status</span>
+                          <span className="text-xs font-black text-indigo-500">{rate}%</span>
                         </div>
-                        <div className="h-px bg-indigo-500/20" />
-                        <div className="flex items-center gap-4">
-                          <MessageSquare size={20} className="opacity-30" />
-                          <input value={newCardBack} onChange={e => setNewCardBack(e.target.value)} placeholder="Antwort..." className="w-full bg-transparent border-none focus:ring-0 text-base outline-none italic" />
+                        <div className="w-full h-1.5 bg-black/10 dark:bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${rate}%` }} />
                         </div>
-                        <button onClick={() => addCard(selectedDeck.id)} className="w-full h-12 bg-slate-800 text-white rounded-lg flex items-center justify-center hover:bg-indigo-600 transition">
-                          <Save size={20} />
+                      </div>
+
+                      <div className="mt-auto flex gap-2">
+                        <button onClick={() => { setSelectedDeckId(deck.id); setActiveView('editor'); }} className={`p-4 rounded-xl border transition-all ${darkMode ? 'border-white/10 hover:bg-white/5' : 'border-black/5 hover:bg-black/5'}`}><Settings size={18} /></button>
+                        <button onClick={() => startSession(deck)} className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:brightness-110 transition-all shadow-lg shadow-indigo-600/20">
+                          <Play size={16} fill="currentColor" /> Start
                         </button>
                       </div>
-
-                      <div className="space-y-1">
-                        {selectedDeck.cards.map(card => (
-                          <div key={card.id} className="group p-4 flex items-center justify-between border-b border-black/5 hover:bg-black/5 transition">
-                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                              <span className="font-bold">{card.front}</span>
-                              <span className="opacity-60 italic sm:border-l sm:pl-4 border-black/10">{card.back}</span>
-                            </div>
-                            <button onClick={() => deleteCard(selectedDeck.id, card.id)} className="p-2 opacity-0 group-hover:opacity-100 text-red-400 transition flex items-center justify-center"><Trash2 size={16} /></button>
-                          </div>
-                        ))}
-                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center border-4 border-dashed rounded-3xl border-black/5 opacity-40">
-                    <Brain size={48} className="mb-4" />
-                    <p className="text-xs font-bold uppercase tracking-widest">Deck auswählen</p>
-                  </div>
-                )}
+                  );
+                })}
               </div>
             </div>
-          </div>
-        ) : (
-          /* LEARN VIEW */
-          <div className="max-w-xl mx-auto py-2">
-            {!session ? (
-              <div className="space-y-6">
-                <h2 className="text-2xl font-black uppercase italic mb-8">Lernen beginnen</h2>
-                <div className="grid grid-cols-1 gap-4">
-                  {decks.map(deck => (
-                    <button key={deck.id} onClick={() => startLearning(deck)} className={`p-8 rounded-xl border-2 text-left transition-all active:scale-[0.98] ${paperClass} hover:-rotate-1 relative overflow-hidden`}>
-                      <div className="absolute top-0 left-0 w-1.5 h-full bg-red-200" />
-                      <p className="font-bold text-xl uppercase italic mb-2">{deck.name}</p>
-                      <span className="text-xs opacity-40 font-bold uppercase">{deck.cards.length} Karteikarten</span>
-                    </button>
+          )}
+
+          {activeView === 'editor' && activeDeck && (
+            <div className="animate-in fade-in duration-500 space-y-8">
+              <button onClick={() => setActiveView('dashboard')} className="flex items-center gap-2 opacity-30 hover:opacity-100 font-black text-[10px] uppercase tracking-widest"><ChevronRight className="rotate-180" /> Zurück</button>
+              <h2 className="text-4xl font-black italic tracking-tighter">{activeDeck.name}</h2>
+
+              <div className="grid lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-1">
+                  <div className={`p-8 rounded-[2rem] border sticky top-8 ${darkMode ? 'bg-zinc-900 border-white/5' : 'bg-white border-black/5 shadow-xl'}`}>
+                    <h2 className="text-xl font-black mb-6 italic">Neu</h2>
+                    <div className="space-y-4">
+                      <input id="f-in" placeholder="Inhalt..." className="w-full p-5 rounded-2xl bg-black/20 border border-white/10 outline-none focus:border-indigo-500/50 font-bold" />
+                      <input id="b-in" placeholder="Lösung..." className="w-full p-5 rounded-2xl bg-black/20 border border-white/10 outline-none focus:border-indigo-500/50 font-bold italic" />
+                      <button onClick={() => {
+                        const f = document.getElementById('f-in');
+                        const b = document.getElementById('b-in');
+                        if (f.value && b.value) {
+                          setDecks(decks.map(d => d.id === selectedDeckId ? { ...d, cards: [...d.cards, { id: Date.now(), front: f.value, back: b.value, box: 1 }] } : d));
+                          f.value = ''; b.value = ''; f.focus();
+                        }
+                      }} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl">Hinzufügen</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="lg:col-span-2 space-y-3">
+                  {activeDeck.cards.map(card => (
+                    <div key={card.id} className={`p-6 rounded-2xl border flex justify-between items-center ${darkMode ? 'bg-zinc-900/20 border-white/5' : 'bg-white border-black/5 shadow-sm'}`}>
+                      <div className="flex-1 grid grid-cols-2 gap-4">
+                        <p className="font-bold">{card.front}</p>
+                        <p className="italic font-bold text-indigo-500">{card.back}</p>
+                      </div>
+                      <button onClick={() => setDecks(decks.map(d => d.id === selectedDeckId ? { ...d, cards: d.cards.filter(c => c.id !== card.id) } : d))} className="p-3 text-rose-500/40 hover:text-rose-500"><Trash2 size={18} /></button>
+                    </div>
                   ))}
                 </div>
               </div>
-            ) : session.finished ? (
-              <div className={`p-10 rounded-2xl text-center space-y-8 border-2 ${paperClass}`}>
-                <div className="inline-block p-8 bg-indigo-500/10 text-indigo-500 rounded-full animate-bounce mx-auto flex items-center justify-center">
-                  <Trophy size={64} />
-                </div>
-                <h2 className="text-3xl font-bold italic">Session beendet</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-green-500/5 border border-green-500/20 p-6 rounded-xl">
-                    <p className="text-3xl font-black text-green-600">{session.results.correct}</p>
-                    <Check size={20} className="mx-auto mt-2 text-green-500" />
-                  </div>
-                  <div className="bg-red-500/5 border border-red-500/20 p-6 rounded-xl">
-                    <p className="text-3xl font-black text-red-600">{session.results.wrong}</p>
-                    <X size={20} className="mx-auto mt-2 text-red-500" />
-                  </div>
-                </div>
+            </div>
+          )}
 
-                {/* FEHLERANALYSE */}
-                {session.wrongAnswers.length > 0 && (
-                  <div className="text-left space-y-6 pt-6 border-t border-black/10">
-                    <h3 className="text-xs font-black uppercase tracking-widest opacity-50 flex items-center gap-2">
-                      <AlertTriangle size={14} className="text-red-500" /> Fehleranalyse
-                    </h3>
-                    <div className="space-y-4 max-h-72 overflow-y-auto pr-2 custom-scrollbar">
-                      {session.wrongAnswers.map((card, idx) => (
-                        <div key={idx} className="p-4 bg-black/5 rounded-xl border border-black/5 space-y-3">
-                          <div>
-                            <p className="text-[10px] font-bold opacity-30 uppercase tracking-wider mb-1">Frage</p>
-                            <p className="font-bold text-base font-serif italic">{card.front}</p>
+          {activeView === 'learn' && session && (
+            <div className="max-w-3xl mx-auto py-4 space-y-8">
+              {!session.isFinished ? (
+                <div className="animate-in fade-in zoom-in-95 duration-500 space-y-8">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="font-black italic text-lg opacity-40">{session.currentIndex + 1}</span>
+                      <span className="opacity-10 font-black">/</span>
+                      <span className="font-black italic text-lg opacity-40">{session.cards.length}</span>
+                    </div>
+                    <button onClick={() => setActiveView('dashboard')} className="p-3 hover:bg-rose-500/10 hover:text-rose-500 rounded-full transition-all"><X size={20} /></button>
+                  </div>
+
+                  <div className={`relative p-12 md:p-24 rounded-[4rem] border text-center transition-all duration-500 ${isAnswerChecked
+                      ? isCorrect ? 'bg-green-500/10 border-green-500/30' : 'bg-rose-500/10 border-rose-500/30'
+                      : (darkMode ? 'bg-zinc-900 border-white/5' : 'bg-white border-black/5 shadow-2xl')
+                    }`}>
+
+                    {isAnswerChecked && (
+                      <div className={`absolute top-10 left-1/2 -translate-x-1/2 px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-[0.4em] flex items-center gap-3 animate-in slide-in-from-top-4 ${isCorrect ? 'bg-green-500 text-white' : 'bg-rose-500 text-white'
+                        }`}>
+                        {isCorrect ? <ThumbsUp size={14} /> : <ThumbsDown size={14} />}
+                        {isCorrect ? 'Richtig' : 'Falsch'}
+                      </div>
+                    )}
+
+                    <h2 className="text-4xl md:text-6xl font-black italic tracking-tighter mb-20 leading-tight">{session.cards[session.currentIndex].front}</h2>
+
+                    <div className="max-w-sm mx-auto space-y-4">
+                      <input
+                        ref={answerInputRef} autoFocus type="text" value={userAnswer}
+                        onChange={(e) => setUserAnswer(e.target.value)}
+                        disabled={isAnswerChecked} placeholder="..."
+                        className={`w-full py-6 px-10 rounded-3xl text-center text-xl font-black bg-black/20 border-2 outline-none transition-all ${isAnswerChecked ? (isCorrect ? 'border-green-500 text-green-500' : 'border-rose-500 text-rose-500') : 'border-white/10 focus:border-indigo-500'
+                          }`}
+                      />
+
+                      {isAnswerChecked && !isCorrect && (
+                        <div className="p-6 bg-rose-500/10 rounded-3xl border border-rose-500/20 animate-in fade-in">
+                          <p className="text-2xl font-black italic text-rose-500">{session.cards[session.currentIndex].back}</p>
+                        </div>
+                      )}
+
+                      <div className="pt-6">
+                        {!isAnswerChecked ? (
+                          <button onClick={checkAnswer} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3">
+                            <Check size={16} /> Prüfen
+                          </button>
+                        ) : (
+                          <button onClick={nextCard} className={`w-full py-6 rounded-3xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 transition-transform active:scale-95 ${isCorrect ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>
+                            Weiter <ChevronRight size={16} />
+                          </button>
+                        )}
+                        <div className="mt-4 flex items-center justify-center gap-2 opacity-10">
+                          <Keyboard size={12} />
+                          <span className="text-[10px] font-black uppercase tracking-tighter">Enter / Space</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-8 animate-in zoom-in-95 duration-500">
+                  <div className={`p-16 text-center space-y-8 rounded-[4rem] border ${darkMode ? 'bg-zinc-900 border-white/5 shadow-2xl' : 'bg-white border-black/5 shadow-xl'}`}>
+                    <Award className="mx-auto text-indigo-500" size={64} />
+                    <h2 className="text-5xl font-black italic tracking-tighter uppercase">Abgeschlossen</h2>
+                    <div className="flex gap-4 max-w-xs mx-auto">
+                      <div className="flex-1 p-6 rounded-3xl bg-green-500/10 border border-green-500/20">
+                        <p className="text-3xl font-black text-green-500">{session.results.correct}</p>
+                      </div>
+                      <div className="flex-1 p-6 rounded-3xl bg-rose-500/10 border border-rose-500/20">
+                        <p className="text-3xl font-black text-rose-500">{session.results.wrong}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setActiveView('dashboard')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-black uppercase tracking-widest text-[10px]">Dashboard</button>
+                  </div>
+
+                  <div className={`p-8 rounded-[3rem] border ${darkMode ? 'bg-zinc-900/40 border-white/5' : 'bg-white border-black/5 shadow-xl'}`}>
+                    <h3 className="text-xl font-black italic mb-8 flex items-center gap-3 opacity-40 uppercase tracking-widest text-[10px]"><History size={16} /> Protokoll</h3>
+                    <div className="space-y-3">
+                      {session.history.map((item, idx) => (
+                        <div key={idx} className={`p-5 rounded-2xl flex flex-col md:flex-row md:items-center gap-4 border ${item.isCorrect ? 'bg-green-500/5 border-green-500/10' : 'bg-rose-500/5 border-rose-500/10'}`}>
+                          <div className="flex-1">
+                            <p className="font-bold text-lg">{item.front}</p>
                           </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <p className="text-[10px] font-bold opacity-30 uppercase tracking-wider mb-1">Deine Antwort</p>
-                              <p className="text-red-500 line-through text-sm font-medium">{card.userType || '(keine)'}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] font-bold opacity-30 uppercase tracking-wider mb-1">Richtige Antwort</p>
-                              <div className="flex items-center gap-1.5 text-green-600 font-bold text-sm">
-                                <Check size={14} strokeWidth={3} />
-                                <span>{card.back}</span>
-                              </div>
-                            </div>
+                          <div className="flex-1 border-l border-white/5 pl-4">
+                            <span className="text-[10px] font-black uppercase opacity-30 block mb-1">Deine Antwort</span>
+                            <p className={`font-black ${item.isCorrect ? 'text-green-500' : 'text-rose-500'}`}>{item.input}</p>
                           </div>
+                          {!item.isCorrect && (
+                            <div className="flex-1 border-l border-white/5 pl-4">
+                              <span className="text-[10px] font-black uppercase opacity-30 block mb-1">Lösung</span>
+                              <p className="font-black italic text-indigo-500">{item.back}</p>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
+            </div>
+          )}
 
-                <button onClick={() => setSession(null)} className="w-full h-16 bg-slate-800 text-white rounded-xl font-bold flex items-center justify-center shadow-lg transition">
-                  <ChevronLeft size={24} />
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                <div className={`p-4 rounded-xl border-2 flex items-center gap-4 ${paperClass}`}>
-                  <button onClick={() => setSession(null)} className="text-slate-400 p-1.5 flex items-center justify-center"><ChevronLeft size={28} /></button>
-                  <div className="flex-1 h-2 bg-black/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${(session.currentIndex / session.cards.length) * 100}%` }} />
+          {activeView === 'stats' && (
+            <div className="animate-in fade-in slide-in-from-left-4 duration-500 space-y-12">
+              <h2 className="text-6xl font-black italic tracking-tighter">Status</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  { label: 'Einheiten', value: decks.reduce((acc, d) => acc + d.cards.length, 0), color: 'text-indigo-500' },
+                  { label: 'Meister', value: decks.reduce((acc, d) => acc + d.cards.filter(c => c.box === 5).length, 0), color: 'text-green-500' },
+                  { label: 'Level', value: Math.floor(decks.reduce((acc, d) => acc + d.cards.reduce((sum, c) => sum + (c.box - 1), 0), 0) / 5), color: 'text-yellow-500' }
+                ].map((stat, i) => (
+                  <div key={i} className={`p-10 rounded-[3rem] border ${darkMode ? 'bg-zinc-900/40 border-white/5 shadow-2xl' : 'bg-white border-black/5 shadow-xl'}`}>
+                    <span className="text-[10px] font-black opacity-30 uppercase tracking-widest block mb-4">{stat.label}</span>
+                    <p className={`text-7xl font-black italic leading-none ${stat.color}`}>{stat.value}</p>
                   </div>
-                  <span className="text-[10px] font-bold opacity-30">{session.currentIndex + 1}/{session.cards.length}</span>
-                </div>
-
-                <div className="relative min-h-[300px]">
-                  <div className={`transition-all duration-300 ${isNewCardAnimating ? '-translate-y-4 opacity-0' : 'translate-x-0 opacity-100'}`}>
-                    <div className={`relative p-10 rounded-sm border-2 shadow-xl transition-all duration-500 flex flex-col items-center justify-center min-h-[350px] overflow-hidden ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-[#d1d1c4]'
-                      }`}>
-                      {!darkMode && (
-                        <div className="absolute inset-0 pointer-events-none"
-                          style={{
-                            background: `linear-gradient(#e1e1d8 1px, transparent 1px)`,
-                            backgroundSize: `100% 2.5rem`,
-                            paddingTop: '3.5rem'
-                          }}
-                        >
-                          <div className="absolute left-10 top-0 w-px h-full bg-red-200" />
-                        </div>
-                      )}
-
-                      <div className="relative z-10 text-center space-y-6">
-                        <div className="opacity-10 flex justify-center flex items-center justify-center">
-                          {!session.showResult ? <HelpCircle size={40} /> : <MessageSquare size={40} />}
-                        </div>
-
-                        {!session.showResult ? (
-                          <h3 className="text-3xl md:text-5xl font-bold italic leading-tight">
-                            {session.cards[session.currentIndex].front}
-                          </h3>
-                        ) : (
-                          <div className="animate-in slide-in-from-bottom-4 duration-300 flex flex-col items-center space-y-6">
-                            <h3 className="text-3xl md:text-5xl font-bold italic text-indigo-600 dark:text-indigo-400 leading-tight">
-                              {session.cards[session.currentIndex].back}
-                            </h3>
-                            <div className={`p-4 rounded-full border-2 flex items-center justify-center ${session.userInput.trim().toLowerCase() === session.cards[session.currentIndex].back.trim().toLowerCase() ? 'border-green-500 text-green-500' : 'border-red-500 text-red-500'}`}>
-                              {session.userInput.trim().toLowerCase() === session.cards[session.currentIndex].back.trim().toLowerCase() ? <Check size={32} /> : <X size={32} />}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="max-w-sm mx-auto space-y-6 pb-20">
-                  {!session.showResult ? (
-                    <div className="flex flex-col gap-4">
-                      <input
-                        ref={answerInputRef} type="text" value={session.userInput}
-                        onChange={e => setSession({ ...session, userInput: e.target.value })}
-                        onKeyDown={e => e.key === 'Enter' && checkAnswer()}
-                        placeholder="Antwort hier schreiben..."
-                        className={`w-full h-16 rounded-xl text-center font-bold text-xl border-2 shadow-lg outline-none transition-all focus:border-indigo-500 ${paperClass}`}
-                      />
-                      <button onClick={checkAnswer} className="w-full h-16 bg-indigo-600 text-white rounded-xl shadow-lg flex items-center justify-center active:scale-95 transition-transform">
-                        <Eye size={32} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={nextCard} className="w-full h-16 bg-slate-800 text-white rounded-xl shadow-lg flex items-center justify-center active:scale-95 transition-all hover:bg-indigo-600">
-                      <ArrowRight size={32} />
-                    </button>
-                  )}
-                </div>
+                ))}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+
+          {activeView === 'settings' && (
+            <div className="max-w-2xl mx-auto space-y-12 animate-in fade-in duration-500">
+              <h2 className="text-6xl font-black italic tracking-tighter">Optionen</h2>
+              <div className={`p-10 rounded-[3rem] border space-y-6 ${darkMode ? 'bg-zinc-900/40 border-white/5' : 'bg-white border-black/5 shadow-xl'}`}>
+                <div className="grid grid-cols-2 gap-4">
+                  <button onClick={() => {
+                    const blob = new Blob([JSON.stringify(decks)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.href = url; a.download = 'vivid_backup.json'; a.click();
+                  }} className="p-8 rounded-[2rem] border border-white/10 hover:bg-white/5 transition-all flex flex-col gap-4 items-center group">
+                    <Download className="text-indigo-500" size={32} />
+                    <span className="font-black text-[10px] uppercase tracking-widest">Backup</span>
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className="p-8 rounded-[2rem] border border-white/10 hover:bg-white/5 transition-all flex flex-col gap-4 items-center group">
+                    <Upload className="text-purple-500" size={32} />
+                    <span className="font-black text-[10px] uppercase tracking-widest">Import</span>
+                  </button>
+                </div>
+                <input type="file" ref={fileInputRef} onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (ev) => { try { setDecks(JSON.parse(ev.target.result)); notify('Daten geladen'); } catch (e) { notify('Fehler'); } };
+                  reader.readAsText(file);
+                }} className="hidden" accept=".json" />
+                <button onClick={() => { if (confirm('Alles löschen?')) { setDecks(DEFAULT_DECKS); notify('Reset'); } }} className="w-full p-6 rounded-2xl border border-rose-500/20 text-rose-500 font-black text-[10px] uppercase tracking-widest hover:bg-rose-500/5 transition-all">Alles Zurücksetzen</button>
+              </div>
+            </div>
+          )}
+
+        </div>
       </main>
 
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,700&family=Inter:wght@400;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&family=Kalam:wght@400;700&display=swap');
-        
-        .font-custom-serif { font-family: 'Playfair Display', serif; }
-        .font-custom-sans { font-family: 'Inter', sans-serif; }
-        .font-custom-mono { font-family: 'Courier Prime', monospace; }
-        .font-custom-hand { font-family: 'Kalam', cursive; }
+      {notification && (
+        <div className="fixed bottom-24 md:bottom-10 left-1/2 -translate-x-1/2 px-8 py-5 bg-white text-black dark:bg-zinc-100 rounded-full shadow-2xl z-[150] flex items-center gap-4 animate-in slide-in-from-bottom-8">
+          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
+          <span className="font-black text-[10px] uppercase tracking-widest">{notification}</span>
+        </div>
+      )}
 
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
-        input::placeholder { opacity: 0.3; font-style: italic; }
-
-        select option {
-          font-weight: bold;
-          padding: 10px;
-        }
-
-        .perspective-1000 { perspective: 1000px; }
-        .backface-hidden { backface-visibility: hidden; }
-        .transform-style-3d { transform-style: preserve-3d; }
-      `}} />
+      <style>{`
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        .animate-in { animation: fade-in 0.5s ease-out forwards; }
+        .slide-in-from-bottom-4 { transform: translateY(1rem); }
+        .slide-in-from-bottom-8 { transform: translateY(2rem); }
+        .slide-in-from-top-4 { transform: translateY(-1rem); }
+        .zoom-in-95 { transform: scale(0.95); }
+        input::placeholder { opacity: 0.1; }
+      `}</style>
     </div>
   );
 };
